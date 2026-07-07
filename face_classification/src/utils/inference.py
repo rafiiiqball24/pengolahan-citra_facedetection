@@ -4,7 +4,8 @@ import numpy as np
 from tensorflow.keras.utils import load_img, img_to_array
 
 def load_image(image_path, grayscale=False, target_size=None):
-    pil_image = load_img(image_path, grayscale=grayscale, color_mode='rgb', target_size=target_size)
+    color_mode = 'grayscale' if grayscale else 'rgb'
+    pil_image = load_img(image_path, color_mode=color_mode, target_size=target_size)
     return img_to_array(pil_image)
 
 def load_detection_model(model_path):

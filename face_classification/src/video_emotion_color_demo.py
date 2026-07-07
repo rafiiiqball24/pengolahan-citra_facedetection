@@ -1,4 +1,5 @@
 from statistics import mode
+from pathlib import Path
 
 import cv2
 from keras.models import load_model
@@ -12,18 +13,22 @@ from utils.inference import apply_offsets
 from utils.inference import load_detection_model
 from utils.preprocessor import preprocess_input
 
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+
 # parameters for loading data and images
-detection_model_path = '../trained_models/detection_models/haarcascade_frontalface_default.xml'
-emotion_model_path = '../trained_models/emotion_models/fer2013_mini_XCEPTION.102-0.66.hdf5'
+detection_model_path = PROJECT_DIR / 'trained_models' / 'detection_models' / 'haarcascade_frontalface_default.xml'
+emotion_model_path = PROJECT_DIR / 'trained_models' / 'emotion_models' / 'fer2013_mini_XCEPTION.102-0.66.hdf5'
 emotion_labels = get_labels('fer2013')
+emotion_names = [emotion_labels[index] for index in sorted(emotion_labels.keys())]
 
 # hyper-parameters for bounding boxes shape
-frame_window = 10
-emotion_offsets = (20, 40)
+frame_window = 3
+emotion_offsets = (10, 10)
 
 # loading models
-face_detection = load_detection_model(detection_model_path)
-emotion_classifier = load_model(emotion_model_path, compile=False)
+face_detection = load_detection_model(str(detection_model_path))
+emotion_classifier = load_model(str(emotion_model_path), compile=False)
 
 # getting input model shapes for inference
 emotion_target_size = emotion_classifier.input_shape[1:3]
@@ -34,8 +39,12 @@ emotion_window = []
 # starting video streaming
 cv2.namedWindow('window_frame')
 video_capture = cv2.VideoCapture(0)
+if not video_capture.isOpened():
+    raise RuntimeError('Unable to open default camera (index 0).')
 while True:
-    bgr_image = video_capture.read()[1]
+    ret, bgr_image = video_capture.read()
+    if not ret:
+        break
     gray_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
     rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
     faces = detect_faces(face_detection, gray_image)
@@ -49,11 +58,13 @@ while True:
         except:
             continue
 
+        # Improve local contrast for webcam input before classification.
+        gray_face = cv2.equalizeHist(gray_face)
         gray_face = preprocess_input(gray_face, True)
         gray_face = np.expand_dims(gray_face, 0)
         gray_face = np.expand_dims(gray_face, -1)
-        emotion_prediction = emotion_classifier.predict(gray_face)
-        emotion_probability = np.max(emotion_prediction)
+        emotion_prediction = emotion_classifier.predict(gray_face, verbose=0)
+        emotion_probability = float(np.max(emotion_prediction))
         emotion_label_arg = np.argmax(emotion_prediction)
         emotion_text = emotion_labels[emotion_label_arg]
         emotion_window.append(emotion_text)
@@ -80,8 +91,19 @@ while True:
         color = color.tolist()
 
         draw_bounding_box(face_coordinates, rgb_image, color)
-        draw_text(face_coordinates, rgb_image, emotion_mode,
+        label_text = f'{emotion_mode} {emotion_probability:.2f}'
+        draw_text(face_coordinates, rgb_image, label_text,
                   color, 0, -45, 1, 1)
+
+        top_scores = sorted(
+            zip(emotion_names, emotion_prediction[0]),
+            key=lambda item: float(item[1]),
+            reverse=True
+        )
+        for score_index, (score_label, score_value) in enumerate(top_scores):
+            score_text = f'{score_label}: {float(score_value):.2f}'
+            draw_text(face_coordinates, rgb_image, score_text,
+                      color, 0, 20 + (score_index * 18), 0.5, 1)
 
     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
     cv2.imshow('window_frame', bgr_image)
